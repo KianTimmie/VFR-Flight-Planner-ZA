@@ -2009,28 +2009,36 @@ function wireMapModeButtons(){
     if(GPS.pos && mmMap) mmMap.setView([GPS.pos.lat,GPS.pos.lon], 10);
     else { const di=depPick.get(); if(di!=null&&mmMap) mmMap.setView([AIRPORTS[di].lat,AIRPORTS[di].lon],8); } };
 }
-// fetch METARs for MANY stations in a single call (comma-separated ids).
-// Returns a map: icao -> metar object. Much faster/reliable than one-by-one.
+// fetch METARs for MANY stations. Splits into chunks (URL-length safe), runs
+// them in parallel, merges. Returns icao -> metar map. The API returns data
+// only for stations that actually report, so passing many ids is fine.
 async function fetchWxMulti(icaos){
-  const ids=icaos.join(',');
-  const apiM='https://aviationweather.gov/api/data/metar?ids='+encodeURIComponent(ids)+'&format=json';
-  const urls=[
-    '/.netlify/functions/wx?type=metar&ids='+encodeURIComponent(ids),
-    'https://api.allorigins.win/raw?url='+encodeURIComponent(apiM),
-    apiM
-  ];
-  for(const u of urls){
-    try{
-      const r=await fetch(u); if(!r.ok) continue;
-      let arr=await r.json();
-      if(typeof arr==='string'){ try{arr=JSON.parse(arr);}catch(e){} }
-      if(!Array.isArray(arr) || !arr.length) continue;
-      const map={};
-      arr.forEach(m=>{ const code=m.icaoId||m.station_id; if(code) map[code]=m; });
-      return {map, via:u.indexOf('/.netlify')===0?'netlify-fn':(u.indexOf('allorigins')>-1?'allorigins':'direct')};
-    }catch(e){ /* try next */ }
-  }
-  return {map:{}, error:'all sources failed'};
+  const CHUNK=80;
+  const chunks=[];
+  for(let i=0;i<icaos.length;i+=CHUNK) chunks.push(icaos.slice(i,i+CHUNK));
+  let via=null, anyOk=false;
+  const merged={};
+  await Promise.all(chunks.map(async chunk=>{
+    const ids=chunk.join(',');
+    const apiM='https://aviationweather.gov/api/data/metar?ids='+encodeURIComponent(ids)+'&format=json';
+    const urls=[
+      ['netlify-fn','/.netlify/functions/wx?type=metar&ids='+encodeURIComponent(ids)],
+      ['allorigins','https://api.allorigins.win/raw?url='+encodeURIComponent(apiM)],
+      ['direct',apiM]
+    ];
+    for(const [name,u] of urls){
+      try{
+        const r=await fetch(u); if(!r.ok) continue;
+        let arr=await r.json();
+        if(typeof arr==='string'){ try{arr=JSON.parse(arr);}catch(e){} }
+        if(!Array.isArray(arr)) continue;
+        arr.forEach(m=>{ const code=m.icaoId||m.station_id; if(code) merged[code]=m; });
+        anyOk=true; via=via||name;
+        break; // this chunk succeeded, stop trying sources for it
+      }catch(e){ /* try next source */ }
+    }
+  }));
+  return anyOk ? {map:merged, via} : {map:{}, error:'all sources failed'};
 }
 
 // plot color-coded weather around nearby/route airfields on the live map
@@ -2038,24 +2046,12 @@ async function showMapWeather(){
   if(!mmMap){ toast('Weather: map not ready yet — wait a moment and try again.'); mmState.wx=false; updateMmButtons(); return; }
   if(mmLayers.wx){ mmLayers.wx.forEach(m=>mmMap.removeLayer(m)); }
   mmLayers.wx=[];
-  // gather candidate airfields: route stops + nearest to map centre / GPS
-  const ids=new Set();
-  const di=depPick.get(), ai=arrPick.get();
-  if(di!=null&&AIRPORTS[di].icao) ids.add(AIRPORTS[di].icao);
-  (typeof waypoints!=='undefined'?waypoints:[]).forEach(w=>{ if(AIRPORTS[w]&&AIRPORTS[w].icao) ids.add(AIRPORTS[w].icao); });
-  if(ai!=null&&AIRPORTS[ai].icao) ids.add(AIRPORTS[ai].icao);
-  let centre;
-  try{ const c=mmMap.getCenter(); centre={lat:c.lat,lon:c.lng}; }catch(e){}
-  if(GPS.pos) centre={lat:GPS.pos.lat,lon:GPS.pos.lon};
-  if(centre){
-    AIRPORTS.filter(a=>a.icao && !a.custom)
-      .map(a=>({a,d:distance(centre,a).nm}))
-      .sort((x,y)=>x.d-y.d).slice(0,25)   // grab more, since one call is cheap
-      .forEach(o=>ids.add(o.a.icao));
-  }
-  const idList=[...ids];
+  // Gather candidate airfields. We pass ALL airfields with ICAO codes in the
+  // region — the API only returns the ones that actually report, so this
+  // naturally surfaces every reporting station (~40), not just the nearest few.
+  const idList=AIRPORTS.filter(a=>a.icao && !a.custom).map(a=>a.icao);
   if(!idList.length){ toast('Weather: no reporting airfields in view.'); mmState.wx=false; updateMmButtons(); return; }
-  toast('Loading weather…');
+  toast('Loading weather for the region…');
   const {map,error,via}=await fetchWxMulti(idList);
   const keys=Object.keys(map);
   if(!keys.length){ toast('No weather returned'+(error?' ('+error+')':'')+'.'); return; }
