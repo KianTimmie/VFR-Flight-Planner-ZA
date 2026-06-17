@@ -2090,12 +2090,20 @@ async function showMapWeather(){
   if(!mmMap){ toast('Weather: map not ready yet — wait a moment and try again.'); mmState.wx=false; updateMmButtons(); return; }
   if(mmLayers.wx){ mmLayers.wx.forEach(m=>mmMap.removeLayer(m)); }
   mmLayers.wx=[];
-  // Query only fields likely to report (medium/large airports). METAR stations
-  // are virtually always these, so this catches essentially all real stations
-  // while skipping hundreds of tiny strips that never report — far faster.
-  const idList=AIRPORTS.filter(a=>a.icao && !a.custom &&
-      (a.type==='large_airport'||a.type==='medium_airport')).map(a=>a.icao);
-  if(!idList.length){ toast('Weather: no reporting airfields found.'); mmState.wx=false; updateMmButtons(); return; }
+  // South Africa only (ICAO prefix "FA"). Query ALL of them — not just
+  // medium/large — so we catch every reporting station regardless of how it's
+  // classified. Non-reporting fields simply return nothing, so this costs the
+  // same few batched calls but maximises stations. Ordered nearest-first to the
+  // map centre so the most relevant ones draw first as batches arrive.
+  let centre=null;
+  try{ const c=mmMap.getCenter(); centre={lat:c.lat,lon:c.lng}; }catch(e){}
+  if(GPS.pos) centre={lat:GPS.pos.lat,lon:GPS.pos.lon};
+  let saFields=AIRPORTS.filter(a=>a.icao && !a.custom && a.icao.indexOf('FA')===0);
+  if(centre){
+    saFields=saFields.map(a=>({a,d:distance(centre,a).nm})).sort((x,y)=>x.d-y.d).map(o=>o.a);
+  }
+  const idList=saFields.map(a=>a.icao);
+  if(!idList.length){ toast('Weather: no South African airfields found.'); mmState.wx=false; updateMmButtons(); return; }
   toast('Loading weather…', 8000);
   const colors={VFR:'#27d796',MVFR:'#3fd0ff',IFR:'#ff5a52',LIFR:'#c061ff'};
   const seen=new Set();
@@ -2116,7 +2124,7 @@ async function showMapWeather(){
       zone.addTo(mmMap); dot.addTo(mmMap);
       mmLayers.wx.push(zone, dot); shown++;
     });
-    if(shown) toast(shown+' airfield'+(shown>1?'s':'')+' shown'+(stale?' ('+stale+' stale hidden)':'')+'. Washes = current data; gaps = none.', 6000);
+    if(shown) toast(shown+' SA airfield'+(shown>1?'s':'')+' shown'+(stale?' ('+stale+' stale hidden)':'')+'. Washes = current data; gaps = none.', 6000);
   };
   const {error,via}=await fetchWxMulti(idList, drawBatch);
   if(!shown){ toast(error? ('No weather ('+error+')') : 'No current weather reports right now.'); }
