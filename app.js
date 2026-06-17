@@ -2009,16 +2009,24 @@ function wireMapModeButtons(){
     if(GPS.pos && mmMap) mmMap.setView([GPS.pos.lat,GPS.pos.lon], 10);
     else { const di=depPick.get(); if(di!=null&&mmMap) mmMap.setView([AIRPORTS[di].lat,AIRPORTS[di].lon],8); } };
 }
-// fetch METARs for MANY stations. Splits into chunks (URL-length safe), runs
-// them in parallel, merges. Returns icao -> metar map. The API returns data
-// only for stations that actually report, so passing many ids is fine.
-async function fetchWxMulti(icaos){
-  const CHUNK=80;
+// fetch with a timeout so a slow/stuck request can't hang the whole operation
+function fetchTimeout(url, ms){
+  return Promise.race([
+    fetch(url),
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
+  ]);
+}
+// fetch METARs for many stations. Splits into URL-safe chunks, runs them in
+// parallel, and calls onBatch(map) as EACH chunk returns so the map can draw
+// progressively instead of waiting for everything. Per-batch timeout + settle
+// means one slow chunk never freezes the rest.
+async function fetchWxMulti(icaos, onBatch){
+  const CHUNK=80, TIMEOUT=8000;
   const chunks=[];
   for(let i=0;i<icaos.length;i+=CHUNK) chunks.push(icaos.slice(i,i+CHUNK));
   let via=null, anyOk=false;
   const merged={};
-  await Promise.all(chunks.map(async chunk=>{
+  await Promise.allSettled(chunks.map(async chunk=>{
     const ids=chunk.join(',');
     const apiM='https://aviationweather.gov/api/data/metar?ids='+encodeURIComponent(ids)+'&format=json';
     const urls=[
@@ -2028,49 +2036,67 @@ async function fetchWxMulti(icaos){
     ];
     for(const [name,u] of urls){
       try{
-        const r=await fetch(u); if(!r.ok) continue;
+        const r=await fetchTimeout(u, TIMEOUT); if(!r.ok) continue;
         let arr=await r.json();
         if(typeof arr==='string'){ try{arr=JSON.parse(arr);}catch(e){} }
         if(!Array.isArray(arr)) continue;
-        arr.forEach(m=>{ const code=m.icaoId||m.station_id; if(code) merged[code]=m; });
+        const batchMap={};
+        arr.forEach(m=>{ const code=m.icaoId||m.station_id; if(code){ merged[code]=m; batchMap[code]=m; } });
         anyOk=true; via=via||name;
-        break; // this chunk succeeded, stop trying sources for it
+        if(onBatch) { try{ onBatch(batchMap); }catch(e){} } // draw this batch now
+        break; // chunk done
       }catch(e){ /* try next source */ }
     }
   }));
-  return anyOk ? {map:merged, via} : {map:{}, error:'all sources failed'};
+  return anyOk ? {map:merged, via} : {map:{}, error:'all sources failed (timeout or blocked)'};
 }
 
-// plot color-coded weather around nearby/route airfields on the live map
+// how old is a METAR, in minutes? uses obsTime (epoch seconds) or reportTime
+function metarAgeMin(m){
+  let t=null;
+  if(m.obsTime) t=m.obsTime*1000;
+  else if(m.reportTime){ const d=new Date(m.reportTime.replace(' ','T')+(m.reportTime.indexOf('Z')<0?'Z':'')); if(!isNaN(d)) t=d.getTime(); }
+  if(t==null) return null;
+  return Math.round((Date.now()-t)/60000);
+}
+
+// plot color-coded weather around region airfields on the live map.
+// Draws progressively as data arrives, only shows reasonably current reports.
+const WX_MAX_AGE_MIN=90; // hide reports older than this (stale); METARs issue hourly
 async function showMapWeather(){
   if(!mmMap){ toast('Weather: map not ready yet — wait a moment and try again.'); mmState.wx=false; updateMmButtons(); return; }
   if(mmLayers.wx){ mmLayers.wx.forEach(m=>mmMap.removeLayer(m)); }
   mmLayers.wx=[];
-  // Gather candidate airfields. We pass ALL airfields with ICAO codes in the
-  // region — the API only returns the ones that actually report, so this
-  // naturally surfaces every reporting station (~40), not just the nearest few.
-  const idList=AIRPORTS.filter(a=>a.icao && !a.custom).map(a=>a.icao);
-  if(!idList.length){ toast('Weather: no reporting airfields in view.'); mmState.wx=false; updateMmButtons(); return; }
-  toast('Loading weather for the region…');
-  const {map,error,via}=await fetchWxMulti(idList);
-  const keys=Object.keys(map);
-  if(!keys.length){ toast('No weather returned'+(error?' ('+error+')':'')+'.'); return; }
+  // Query only fields likely to report (medium/large airports). METAR stations
+  // are virtually always these, so this catches essentially all real stations
+  // while skipping hundreds of tiny strips that never report — far faster.
+  const idList=AIRPORTS.filter(a=>a.icao && !a.custom &&
+      (a.type==='large_airport'||a.type==='medium_airport')).map(a=>a.icao);
+  if(!idList.length){ toast('Weather: no reporting airfields found.'); mmState.wx=false; updateMmButtons(); return; }
+  toast('Loading weather…', 8000);
   const colors={VFR:'#27d796',MVFR:'#3fd0ff',IFR:'#ff5a52',LIFR:'#c061ff'};
-  let shown=0;
-  keys.forEach(icao=>{
-    const m=map[icao]; if(!m || !m.fltCat) return;
-    const a=AIRPORTS.find(x=>x.icao===icao); if(!a) return;
-    const c=colors[m.fltCat]||'#5a6b7d';
-    // shaded "zone" wash around the station (honest: only where we have data)
-    const zone=L.circle([a.lat,a.lon],{radius:55000,color:c,weight:0,fillColor:c,fillOpacity:.16});
-    // crisp category dot at the station itself
-    const dot=L.circleMarker([a.lat,a.lon],{radius:7,color:c,weight:2,fillColor:c,fillOpacity:.9})
-      .bindTooltip(icao+': '+(CAT_LABEL[m.fltCat]||m.fltCat)+(m.rawOb?' — '+m.rawOb:''),{direction:'top'});
-    zone.addTo(mmMap); dot.addTo(mmMap);
-    mmLayers.wx.push(zone, dot); shown++;
-  });
-  if(shown) toast(shown+' airfield'+(shown>1?'s':'')+' shown'+(via?' ['+via+']':'')+'. Coloured washes = data near a station; gaps = no data.');
-  else toast('Weather received but no flight categories available.');
+  const seen=new Set();
+  let shown=0, stale=0;
+  // draw each station as its batch arrives
+  const drawBatch=(batchMap)=>{
+    Object.keys(batchMap).forEach(icao=>{
+      if(seen.has(icao)) return; seen.add(icao);
+      const m=batchMap[icao]; if(!m || !m.fltCat) return;
+      const age=metarAgeMin(m);
+      if(age!=null && age>WX_MAX_AGE_MIN){ stale++; return; } // skip stale
+      const a=AIRPORTS.find(x=>x.icao===icao); if(!a) return;
+      const c=colors[m.fltCat]||'#5a6b7d';
+      const ageTxt=(age!=null)?(' · '+age+' min old'):'';
+      const zone=L.circle([a.lat,a.lon],{radius:55000,color:c,weight:0,fillColor:c,fillOpacity:.16});
+      const dot=L.circleMarker([a.lat,a.lon],{radius:7,color:c,weight:2,fillColor:c,fillOpacity:.9})
+        .bindTooltip(icao+': '+(CAT_LABEL[m.fltCat]||m.fltCat)+ageTxt+(m.rawOb?' — '+m.rawOb:''),{direction:'top'});
+      zone.addTo(mmMap); dot.addTo(mmMap);
+      mmLayers.wx.push(zone, dot); shown++;
+    });
+    if(shown) toast(shown+' airfield'+(shown>1?'s':'')+' shown'+(stale?' ('+stale+' stale hidden)':'')+'. Washes = current data; gaps = none.', 6000);
+  };
+  const {error,via}=await fetchWxMulti(idList, drawBatch);
+  if(!shown){ toast(error? ('No weather ('+error+')') : 'No current weather reports right now.'); }
 }
 // small transient on-screen message (so Map mode can give feedback without alert popups)
 function toast(msg, ms){
