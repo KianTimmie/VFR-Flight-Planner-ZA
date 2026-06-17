@@ -34,6 +34,7 @@ self.addEventListener('fetch', e => {
   // external API — these must always go straight to the network.
   if (url.hostname.includes('tile.openstreetmap.org') ||
       url.hostname.includes('cdnjs.cloudflare.com') ||
+      url.pathname === '/wx' || url.pathname.startsWith('/wx?') ||
       url.pathname.includes('/.netlify/functions/') ||
       url.hostname.includes('aviationweather.gov') ||
       url.hostname.includes('open-meteo.com') ||

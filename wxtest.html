@@ -29,7 +29,7 @@ const ICAO='FACT';
 const apiM='https://aviationweather.gov/api/data/metar?ids='+ICAO+'&format=json';
 
 const methods=[
-  {name:'1. Netlify function (the real fix)', url:'/.netlify/functions/wx?type=metar&ids='+ICAO},
+  {name:'1. Proxy function (/wx)', url:'/wx?type=metar&ids='+ICAO},
   {name:'2. allorigins.win', url:'https://api.allorigins.win/raw?url='+encodeURIComponent(apiM)},
   {name:'3. direct (no proxy)', url:apiM},
 ];

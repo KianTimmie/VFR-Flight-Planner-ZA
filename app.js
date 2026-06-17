@@ -113,6 +113,7 @@ const sel={dep:null,arr:null};
 let waypoints=[]; // array of AIRPORTS indices, intermediate stops in order
 let curRoute=null; // {stopIdx, depIdx, maxRangeNM} for map renderers
 let lastRangeSig=null; // guards range-map re-render
+let lastWxSig=null; // guards briefing weather re-hydration (saves API calls)
 function makePicker(key,inputId,listId){
   const input=$(inputId), list=$(listId); let hlIndex=-1, matches=[];
   const fullLabel=a=>(a.icao||a.iata||'----')+' · '+a.name;
@@ -712,9 +713,15 @@ function render(){
   // range map element persists; only re-render when its inputs change (avoids flicker per keystroke)
   const rsig=(depPick.get())+'|'+Math.round(window._usableRangeNM||0)+'|'+U.dist;
   if(rsig!==lastRangeSig){ lastRangeSig=rsig; renderRangeMap(); }
-  // load weather for any airport cards now shown (debounced so we don't spam the API per keystroke)
-  clearTimeout(window._wxTimer);
-  window._wxTimer=setTimeout(()=>{ if(typeof hydrateWxBlocks==='function') hydrateWxBlocks($('results')); }, 600);
+  // Load weather for shown airport cards — but ONLY when the set of airports
+  // actually changes, not on every render. This stops redundant API/function
+  // calls (which were burning through the Netlify function quota).
+  const wxSig=[depPick.get(), arrPick.get(), (typeof waypoints!=='undefined'?waypoints.join(','):'')].join('|');
+  if(wxSig!==lastWxSig){
+    lastWxSig=wxSig;
+    clearTimeout(window._wxTimer);
+    window._wxTimer=setTimeout(()=>{ if(typeof hydrateWxBlocks==='function') hydrateWxBlocks($('results')); }, 800);
+  }
 }
 
 // insert a waypoint index after a given stop index (which may be dep or another wp)
@@ -1719,7 +1726,7 @@ let wxStrategy=null; // remembers which fetch method worked, for diagnostics
 async function fetchWx(icao){
   if(!icao) return null;
   const now=Date.now();
-  if(wxCache[icao] && now-wxCache[icao].ts < 5*60*1000) return wxCache[icao]; // 5-min cache
+  if(wxCache[icao] && now-wxCache[icao].ts < 15*60*1000) return wxCache[icao]; // 15-min cache
   const id=encodeURIComponent(icao);
   const apiM='https://aviationweather.gov/api/data/metar?ids='+id+'&format=json';
   const apiT='https://aviationweather.gov/api/data/taf?ids='+id+'&format=json';
@@ -1742,8 +1749,8 @@ async function fetchWx(icao){
 
   // strategy list, in order of preference
   const strategies=[
-    ['netlify-fn',    ()=>tryPair('/.netlify/functions/wx?type=metar&ids='+id,
-                                  '/.netlify/functions/wx?type=taf&ids='+id)],
+    ['proxy',    ()=>tryPair('/wx?type=metar&ids='+id,
+                                  '/wx?type=taf&ids='+id)],
     ['allorigins',    ()=>tryPair('https://api.allorigins.win/raw?url='+encodeURIComponent(apiM),
                                   'https://api.allorigins.win/raw?url='+encodeURIComponent(apiT))],
     ['direct',        ()=>tryPair(apiM, apiT)],
@@ -2021,16 +2028,29 @@ function fetchTimeout(url, ms){
 // progressively instead of waiting for everything. Per-batch timeout + settle
 // means one slow chunk never freezes the rest.
 async function fetchWxMulti(icaos, onBatch){
-  const CHUNK=80, TIMEOUT=8000;
+  const CHUNK=80, TIMEOUT=8000, MAXAGE=15*60*1000; // 15-min cache
+  const now=Date.now();
+  // Serve cached stations immediately and only fetch the ones we lack fresh data
+  // for. This is the key saving: re-toggling weather costs zero network calls
+  // within the cache window.
+  const cachedMap={}; const need=[];
+  icaos.forEach(ic=>{
+    const c=wxCache['__m_'+ic];
+    if(c && now-c.ts<MAXAGE){ if(c.metar) cachedMap[ic]=c.metar; }
+    else need.push(ic);
+  });
+  if(onBatch && Object.keys(cachedMap).length){ try{onBatch(cachedMap);}catch(e){} }
+  if(!need.length) return {map:cachedMap, via:'cache'};
+
   const chunks=[];
-  for(let i=0;i<icaos.length;i+=CHUNK) chunks.push(icaos.slice(i,i+CHUNK));
+  for(let i=0;i<need.length;i+=CHUNK) chunks.push(need.slice(i,i+CHUNK));
   let via=null, anyOk=false;
-  const merged={};
+  const merged=Object.assign({},cachedMap);
   await Promise.allSettled(chunks.map(async chunk=>{
     const ids=chunk.join(',');
     const apiM='https://aviationweather.gov/api/data/metar?ids='+encodeURIComponent(ids)+'&format=json';
     const urls=[
-      ['netlify-fn','/.netlify/functions/wx?type=metar&ids='+encodeURIComponent(ids)],
+      ['proxy','/wx?type=metar&ids='+encodeURIComponent(ids)],
       ['allorigins','https://api.allorigins.win/raw?url='+encodeURIComponent(apiM)],
       ['direct',apiM]
     ];
@@ -2041,14 +2061,17 @@ async function fetchWxMulti(icaos, onBatch){
         if(typeof arr==='string'){ try{arr=JSON.parse(arr);}catch(e){} }
         if(!Array.isArray(arr)) continue;
         const batchMap={};
-        arr.forEach(m=>{ const code=m.icaoId||m.station_id; if(code){ merged[code]=m; batchMap[code]=m; } });
+        // record which stations we asked about so we don't re-request silent
+        // (non-reporting) ones every time — cache the negative too.
+        chunk.forEach(ic=>{ if(!wxCache['__m_'+ic]) wxCache['__m_'+ic]={metar:null, ts:Date.now()}; });
+        arr.forEach(m=>{ const code=m.icaoId||m.station_id; if(code){ merged[code]=m; batchMap[code]=m; wxCache['__m_'+code]={metar:m, ts:Date.now()}; } });
         anyOk=true; via=via||name;
-        if(onBatch) { try{ onBatch(batchMap); }catch(e){} } // draw this batch now
-        break; // chunk done
+        if(onBatch){ try{ onBatch(batchMap); }catch(e){} }
+        break;
       }catch(e){ /* try next source */ }
     }
   }));
-  return anyOk ? {map:merged, via} : {map:{}, error:'all sources failed (timeout or blocked)'};
+  return (anyOk||Object.keys(cachedMap).length) ? {map:merged, via:via||'cache'} : {map:{}, error:'all sources failed (timeout or blocked)'};
 }
 
 // how old is a METAR, in minutes? uses obsTime (epoch seconds) or reportTime
