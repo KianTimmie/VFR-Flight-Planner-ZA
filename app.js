@@ -2003,14 +2003,16 @@ function wireMapModeButtons(){
     if(mmState.track){ if(!GPS.on){ GPS.start(); } } else if(mmLayers.crumb){ mmMap.removeLayer(mmLayers.crumb); mmLayers.crumb=null; }
     updateMmButtons(); };
   $('mmWx').onclick=()=>{ mmState.wx=!mmState.wx; updateMmButtons();
-    if(mmState.wx) showMapWeather(); else if(mmLayers.wx){ mmLayers.wx.forEach(m=>mmMap.removeLayer(m)); mmLayers.wx=null; } };
+    if(mmState.wx){ showMapWeather().catch(e=>toast('Weather error: '+((e&&e.message)||e))); }
+    else if(mmLayers.wx){ mmLayers.wx.forEach(m=>mmMap.removeLayer(m)); mmLayers.wx=null; } };
   $('mmRecenter').onclick=()=>{ mmState.follow=true;
     if(GPS.pos && mmMap) mmMap.setView([GPS.pos.lat,GPS.pos.lon], 10);
     else { const di=depPick.get(); if(di!=null&&mmMap) mmMap.setView([AIRPORTS[di].lat,AIRPORTS[di].lon],8); } };
 }
 // plot color-coded weather dots at airports along/near the route on the live map
 async function showMapWeather(){
-  if(!mmMap) return;
+  toast('Weather: gathering airfields…');   // immediate feedback so we know the tap registered
+  if(!mmMap){ toast('Weather: map not ready yet — wait a moment and try again.'); return; }
   if(mmLayers.wx){ mmLayers.wx.forEach(m=>mmMap.removeLayer(m)); }
   mmLayers.wx=[];
   // Build the list of airfields to show weather for:
@@ -2058,10 +2060,10 @@ async function showMapWeather(){
 function toast(msg){
   let t=$('mmToast');
   if(!t){ t=document.createElement('div'); t.id='mmToast'; t.className='mm-toast';
-    const c=$('mapModeContainer'); if(c) c.appendChild(t); else return; }
+    const c=$('mapModeContainer')||document.body; c.appendChild(t); }
   t.textContent=msg; t.style.opacity='1';
   clearTimeout(window._toastTimer);
-  window._toastTimer=setTimeout(()=>{ t.style.opacity='0'; }, 3500);
+  window._toastTimer=setTimeout(()=>{ if(t) t.style.opacity='0'; }, 3500);
 }
 
 // ================= TERRAIN ELEVATION / AGL =================
