@@ -2013,23 +2013,55 @@ async function showMapWeather(){
   if(!mmMap) return;
   if(mmLayers.wx){ mmLayers.wx.forEach(m=>mmMap.removeLayer(m)); }
   mmLayers.wx=[];
-  // gather route airports (dep, wps, arr) that have ICAO codes
-  const di=depPick.get(), ai=arrPick.get(); const ids=[];
-  if(di!=null&&AIRPORTS[di].icao) ids.push(AIRPORTS[di].icao);
-  (typeof waypoints!=='undefined'?waypoints:[]).forEach(w=>{ if(AIRPORTS[w]&&AIRPORTS[w].icao) ids.push(AIRPORTS[w].icao); });
-  if(ai!=null&&AIRPORTS[ai].icao) ids.push(AIRPORTS[ai].icao);
-  for(const icao of ids){
+  // Build the list of airfields to show weather for:
+  //  - any on the active route (dep, waypoints, arr), plus
+  //  - the nearest ICAO airfields to the current map centre / GPS position.
+  // Only airfields with ICAO codes report METARs. Cap the count so we don't
+  // fire dozens of fetches at once.
+  const ids=new Set();
+  const di=depPick.get(), ai=arrPick.get();
+  if(di!=null&&AIRPORTS[di].icao) ids.add(AIRPORTS[di].icao);
+  (typeof waypoints!=='undefined'?waypoints:[]).forEach(w=>{ if(AIRPORTS[w]&&AIRPORTS[w].icao) ids.add(AIRPORTS[w].icao); });
+  if(ai!=null&&AIRPORTS[ai].icao) ids.add(AIRPORTS[ai].icao);
+  // nearest to the map centre (or GPS position if we have it)
+  let centre;
+  try{ const c=mmMap.getCenter(); centre={lat:c.lat,lon:c.lng}; }catch(e){}
+  if(GPS.pos) centre={lat:GPS.pos.lat,lon:GPS.pos.lon};
+  if(centre){
+    AIRPORTS.filter(a=>a.icao && !a.custom)
+      .map(a=>({a,d:distance(centre,a).nm}))
+      .sort((x,y)=>x.d-y.d)
+      .slice(0,10)
+      .forEach(o=>ids.add(o.a.icao));
+  }
+  const idList=[...ids];
+  if(!idList.length){ toast('Weather: no reporting airfields here. Zoom to an area with airports, or plan a route.'); mmState.wx=false; updateMmButtons(); return; }
+  // show a quick "loading" hint since fetches take a moment
+  toast('Loading weather for '+idList.length+' airfields…');
+  let shown=0, anyErr=null;
+  for(const icao of idList){
     const wx=await fetchWx(icao);
+    if(wx && wx.error){ anyErr=wx.error; continue; }
     if(wx && wx.metar && wx.metar.fltCat){
       const a=AIRPORTS.find(x=>x.icao===icao); if(!a) continue;
       const colors={VFR:'#27d796',MVFR:'#3fd0ff',IFR:'#ff5a52',LIFR:'#c061ff'};
       const c=colors[wx.metar.fltCat]||'#5a6b7d';
-      const m=L.circleMarker([a.lat,a.lon],{radius:9,color:c,weight:3,fillColor:c,fillOpacity:.25})
+      const m=L.circleMarker([a.lat,a.lon],{radius:9,color:c,weight:3,fillColor:c,fillOpacity:.3})
         .bindTooltip(icao+': '+(CAT_LABEL[wx.metar.fltCat]||wx.metar.fltCat),{direction:'top'}).addTo(mmMap);
-      mmLayers.wx.push(m);
+      mmLayers.wx.push(m); shown++;
     }
   }
-  if(!mmLayers.wx.length){ /* nothing to show */ }
+  if(shown) toast(shown+' airfield'+(shown>1?'s':'')+' with weather plotted.');
+  else toast('No weather returned'+(anyErr?' ('+anyErr+')':'')+'.');
+}
+// small transient on-screen message (so Map mode can give feedback without alert popups)
+function toast(msg){
+  let t=$('mmToast');
+  if(!t){ t=document.createElement('div'); t.id='mmToast'; t.className='mm-toast';
+    const c=$('mapModeContainer'); if(c) c.appendChild(t); else return; }
+  t.textContent=msg; t.style.opacity='1';
+  clearTimeout(window._toastTimer);
+  window._toastTimer=setTimeout(()=>{ t.style.opacity='0'; }, 3500);
 }
 
 // ================= TERRAIN ELEVATION / AGL =================
