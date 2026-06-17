@@ -1,0 +1,13 @@
+# Netlify configuration for VFR Planner ZA
+#
+# The weather proxy is a serverless function at netlify/functions/wx.js.
+# The browser calls /.netlify/functions/wx?type=metar&ids=FACT (same origin,
+# no CORS), and the function fetches aviationweather.gov server-side and relays
+# it back with permissive CORS headers. Server-side fetches aren't subject to
+# the browser CORS block, so this is the reliable path.
+
+[build]
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"

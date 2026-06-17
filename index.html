@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0e14">
+<title>VFR Planner ZA</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="favicon-32.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VFR Planner">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#121821; --panel2:#0e131b; --line:#22303f;
+    --ink:#e8eef5; --dim:#7d8da0; --faint:#4a5868;
+    --amber:#ffb000; --amber-dim:#7a5400;
+    --green:#27d796; --red:#ff5a52; --cyan:#3fd0ff;
+    --mono:'SF Mono',ui-monospace,'Roboto Mono',Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans)}
+  body{padding:0 0 40px;max-width:520px;margin:0 auto;min-height:100vh}
+  .topbar{
+    position:sticky;top:0;z-index:20;background:linear-gradient(180deg,#0a0e14,#0a0e14f0);
+    border-bottom:1px solid var(--line);padding:14px 18px 12px;backdrop-filter:blur(8px)}
+  .topbar h1{margin:0;font-size:15px;letter-spacing:3px;font-weight:700;color:var(--amber);
+    font-family:var(--mono)}
+  .topbar{display:flex;align-items:center;gap:8px}
+  .tb-titles{flex:1;min-width:0}
+  .back-btn{background:var(--panel2);border:1px solid var(--line);color:var(--amber);
+    width:38px;height:38px;border-radius:10px;font-size:22px;line-height:1;cursor:pointer;flex:none;
+    display:flex;align-items:center;justify-content:center;padding-bottom:3px}
+  .back-btn:active{background:#1a2230}
+
+  /* screens */
+  .screen{display:none}
+  .screen.active{display:block}
+
+  /* home */
+  .home-hero{display:flex;gap:14px;align-items:center;padding:6px 4px 18px}
+  .hero-ico{font-size:30px}
+  .hero-txt{font-size:13px;color:var(--dim);line-height:1.5}
+  .home-tile{width:100%;display:flex;align-items:center;gap:14px;background:var(--panel);
+    border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px;cursor:pointer;text-align:left}
+  .home-tile:active{background:#161e29}
+  .home-tile.primary{border-color:var(--amber-dim);background:linear-gradient(180deg,#15181a,#121821)}
+  .tile-ico{font-size:24px;flex:none;width:30px;text-align:center}
+  .tile-body{flex:1;min-width:0}
+  .tile-t{display:block;font-size:15px;color:var(--ink);font-weight:600}
+  .tile-d{display:block;font-size:11px;color:var(--dim);font-family:var(--mono);margin-top:3px}
+  .tile-arrow{color:var(--faint);font-size:22px;flex:none}
+
+  .mini-btn{margin-left:auto;background:var(--panel2);border:1px solid var(--line);color:var(--amber);
+    font-family:var(--mono);font-size:9px;letter-spacing:.5px;padding:5px 9px;border-radius:7px;cursor:pointer}
+  .mini-btn:active{background:#1a2230}
+  .card-h{display:flex;align-items:center}
+
+  /* manage / trip cards */
+  .mcard{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;margin-bottom:12px}
+  .mcard .mtitle{font-size:15px;color:var(--ink);font-weight:600}
+  .mcard .msub{font-size:11px;color:var(--dim);font-family:var(--mono);margin-top:4px;line-height:1.5}
+  .mcard .mrow{display:flex;gap:9px;margin-top:13px;flex-wrap:wrap}
+  .mcard .mbtn{flex:1;min-width:fit-content;background:var(--panel2);border:1px solid var(--line);color:var(--amber);
+    font-family:var(--mono);font-size:11px;letter-spacing:.5px;padding:11px 10px;border-radius:9px;cursor:pointer}
+  .mcard .mbtn.go{background:var(--amber);color:#06120c;border:none;font-weight:700}
+  .mcard .mbtn.del{color:var(--red);flex:none}
+  .mcard .mbtn:active{filter:brightness(1.2)}
+  .mempty{text-align:center;color:var(--faint);font-family:var(--mono);font-size:12px;padding:40px 10px;line-height:1.7}
+
+  /* backup & restore */
+  .backup-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-top:4px}
+  .backup-h{font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;font-family:var(--mono);margin-bottom:8px}
+  .backup-d{font-size:12px;color:var(--dim);line-height:1.5;margin-bottom:13px}
+  .backup-row{display:flex;gap:9px;margin-bottom:9px}
+  .bk-btn{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--amber);
+    font-family:var(--mono);font-size:11px;letter-spacing:.5px;padding:11px 8px;border-radius:9px;cursor:pointer}
+  .bk-btn.ghost{color:var(--dim)}
+  .bk-btn:active{background:#1a2230}
+  .topbar .sub{font-size:10px;letter-spacing:2px;color:var(--faint);margin-top:3px;
+    font-family:var(--mono);text-transform:uppercase}
+  .wrap{padding:16px 16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin-bottom:14px}
+  .card-h{font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;
+    font-family:var(--mono);margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .card-h::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--amber);
+    box-shadow:0 0 8px var(--amber)}
+  label{display:block;font-size:10px;letter-spacing:1.5px;color:var(--dim);
+    text-transform:uppercase;font-family:var(--mono);margin:0 0 5px}
+  select,input{width:100%;background:var(--panel2);border:1px solid var(--line);
+    color:var(--ink);border-radius:9px;padding:12px 12px;font-size:16px;font-family:var(--sans);
+    -webkit-appearance:none;appearance:none}
+  select:focus,input:focus{outline:none;border-color:var(--amber);
+    box-shadow:0 0 0 2px var(--amber-dim)}
+  .field{margin-bottom:13px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+  .swap{display:flex;justify-content:center;margin:-4px 0 9px}
+  .swap button{background:var(--panel2);border:1px solid var(--line);color:var(--amber);
+    width:40px;height:40px;border-radius:50%;font-size:18px;cursor:pointer;transition:.15s}
+  .swap button:active{transform:rotate(180deg) scale(.92)}
+  .selwrap{position:relative}
+  .selwrap::after{content:"▾";position:absolute;right:14px;top:38px;color:var(--faint);
+    pointer-events:none;font-size:12px}
+  .unit{font-size:9px;color:var(--faint);font-family:var(--mono)}
+
+  .readout{background:linear-gradient(180deg,#0c1119,#0a0e14);border:1px solid var(--line);
+    border-radius:14px;padding:18px 16px;margin-bottom:14px}
+  .big{font-family:var(--mono);font-size:44px;font-weight:700;color:var(--amber);
+    line-height:1;letter-spacing:-1px;text-shadow:0 0 22px rgba(255,176,0,.25)}
+  .big small{font-size:15px;color:var(--dim);font-weight:400;letter-spacing:1px}
+  .route-line{display:flex;align-items:center;gap:10px;margin-bottom:14px;
+    font-family:var(--mono);font-size:13px}
+  .route-line .icao{color:var(--ink);font-weight:700;font-size:16px}
+  .route-line .dash{flex:1;height:1px;background:repeating-linear-gradient(90deg,var(--faint) 0 5px,transparent 5px 10px);position:relative}
+  .route-line .dash::after{content:"✈";position:absolute;right:-2px;top:-9px;color:var(--amber);font-size:14px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+  .stat .k{font-size:9px;letter-spacing:1.5px;color:var(--dim);text-transform:uppercase;font-family:var(--mono)}
+  .stat .v{font-family:var(--mono);font-size:20px;font-weight:700;margin-top:3px}
+  .v.ok{color:var(--green)} .v.bad{color:var(--red)} .v.warn{color:var(--amber)}
+  .v.neutral{color:var(--ink)}
+
+  .verdict{border-radius:12px;padding:13px 15px;margin-top:14px;font-family:var(--mono);
+    font-size:13px;font-weight:700;letter-spacing:.5px;display:flex;align-items:center;gap:10px}
+  .verdict.go{background:rgba(39,215,150,.1);border:1px solid rgba(39,215,150,.4);color:var(--green)}
+  .verdict.nogo{background:rgba(255,90,82,.1);border:1px solid rgba(255,90,82,.4);color:var(--red)}
+  .verdict .big-icon{font-size:18px}
+
+  .fuelbar{margin-top:14px}
+  .fuelbar .track{height:26px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;overflow:hidden;display:flex;position:relative}
+  .seg{height:100%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+    font-size:9px;font-weight:700;color:#06120c;white-space:nowrap;overflow:hidden}
+  .seg.trip{background:linear-gradient(180deg,#3fd0ff,#2ba8d0)}
+  .seg.resv{background:linear-gradient(180deg,#ffb000,#cc8c00)}
+  .seg.extra{background:linear-gradient(180deg,#27d796,#1da874)}
+  .seg.over{background:linear-gradient(180deg,#ff5a52,#cc3f38);color:#fff}
+  .fuelbar .legend{display:flex;gap:14px;margin-top:8px;flex-wrap:wrap}
+  .fuel-head{font-family:var(--mono);font-size:11px;color:var(--dim);margin-bottom:9px}
+  .fuel-head b{color:var(--ink)}
+  .fuelbar .legend span{font-size:9px;color:var(--dim);font-family:var(--mono);display:flex;align-items:center;gap:5px}
+  .dot{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+  .alt-list{margin-top:8px}
+  .alt{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .alt:last-child{border-bottom:none}
+  .alt .rank{font-family:var(--mono);font-size:11px;color:var(--amber);width:18px;font-weight:700}
+  .alt .info{flex:1;min-width:0}
+  .alt .nm{font-size:13px;color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .alt .meta{font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:2px}
+  .alt .dist{font-family:var(--mono);font-size:14px;color:var(--cyan);font-weight:700;text-align:right}
+  .alt .dist small{display:block;font-size:9px;color:var(--faint);font-weight:400}
+
+  .hint{font-size:11px;color:var(--faint);line-height:1.5;font-family:var(--mono);margin-top:4px}
+  .empty{text-align:center;color:var(--faint);font-family:var(--mono);font-size:12px;padding:30px 10px;line-height:1.7}
+  .disc{font-size:10px;color:var(--faint);line-height:1.6;padding:4px 18px 10px;text-align:center}
+  .saverow{display:flex;gap:10px;margin-top:4px}
+  .saverow button{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--amber);
+    padding:11px;border-radius:9px;font-family:var(--mono);font-size:11px;letter-spacing:1px;cursor:pointer}
+  .saverow button:active{background:#1a2230}
+  datalist{display:none}
+
+  /* searchable airport picker */
+  .ac-picker{position:relative}
+  .ac-picker input{padding-right:34px}
+  .ac-picker.chosen input{border-color:var(--amber);color:var(--amber);font-family:var(--mono);font-weight:700}
+  .ac-list{position:absolute;left:0;right:0;top:100%;z-index:30;margin-top:4px;
+    background:var(--panel2);border:1px solid var(--amber);border-radius:10px;
+    max-height:280px;overflow-y:auto;display:none;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+  .ac-list.open{display:block}
+  .ac-opt{padding:11px 13px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;
+    align-items:baseline;gap:10px}
+  .ac-opt:last-child{border-bottom:none}
+  .ac-opt:active,.ac-opt.hl{background:#1a2230}
+  .ac-opt .code{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--amber);
+    min-width:46px}
+  .ac-opt .desc{flex:1;min-width:0}
+  .ac-opt .nm2{font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ac-opt .ct{font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:1px}
+  .ac-opt mark{background:transparent;color:var(--cyan);font-weight:700}
+  .ac-none{padding:16px 13px;color:var(--faint);font-family:var(--mono);font-size:12px;text-align:center}
+  .ac-add{padding:13px;text-align:center;font-family:var(--mono);font-size:12px;color:var(--amber);
+    cursor:pointer;border-top:1px solid var(--line);background:#10161f;letter-spacing:.5px}
+  .ac-add:active{background:#1a2230}
+  .ac-opt.is-custom .code{font-size:15px;min-width:46px}
+
+  /* unit toggle pills */
+  .units{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+  .uset{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:4px;flex:1;min-width:0}
+  .uset .ulab{font-size:9px;letter-spacing:1px;color:var(--faint);font-family:var(--mono);
+    padding-left:6px;text-transform:uppercase}
+  .uset .opts{display:flex;gap:2px;margin-left:auto}
+  .uset .opts button{background:transparent;border:none;color:var(--dim);font-family:var(--mono);
+    font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;cursor:pointer}
+  .uset .opts button.on{background:var(--amber);color:#06120c}
+
+  /* passengers */
+  .pax-row{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+  .pax-row .pn{font-family:var(--mono);font-size:11px;color:var(--dim);width:58px}
+  .pax-row input{flex:1}
+  .pax-row .rm{background:var(--panel2);border:1px solid var(--line);color:var(--red);
+    width:38px;height:44px;border-radius:9px;font-size:16px;cursor:pointer;flex:none}
+  .addpax{width:100%;background:var(--panel2);border:1px dashed var(--line);color:var(--amber);
+    padding:11px;border-radius:9px;font-family:var(--mono);font-size:11px;letter-spacing:1px;
+    cursor:pointer;margin-top:2px}
+  .addpax:active{background:#1a2230}
+
+  /* weight breakdown bar */
+  .wbar{margin-top:6px}
+  .wbar .track{height:30px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    overflow:hidden;display:flex}
+  .wbar .seg{height:100%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+    font-size:9px;font-weight:700;color:#06120c;overflow:hidden;white-space:nowrap}
+  .seg.empty-w{background:linear-gradient(180deg,#5a6b7d,#43505f);color:#dce4ec}
+  .seg.pax-w{background:linear-gradient(180deg,#a78bfa,#8b6fd8);color:#10081f}
+  .seg.cargo-w{background:linear-gradient(180deg,#3fd0ff,#2ba8d0)}
+  .seg.fuel-w{background:linear-gradient(180deg,#27d796,#1da874)}
+  .seg.over-w{background:linear-gradient(180deg,#ff5a52,#cc3f38);color:#fff}
+  .wbar .legend{display:flex;gap:12px;margin-top:8px;flex-wrap:wrap}
+  .wbar .legend span{font-size:9px;color:var(--dim);font-family:var(--mono);display:flex;align-items:center;gap:5px}
+  .mtow-line{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;
+    color:var(--dim);margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+  .mtow-line b{color:var(--ink)}
+
+  /* load allocation */
+  .alloc{margin-top:16px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .alloc-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:11px}
+  .alloc-head span:first-child{font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;font-family:var(--mono)}
+  .alloc-avail{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--amber)}
+  .alloc-bar .track{height:24px;background:var(--bg);border:1px solid var(--line);border-radius:7px;overflow:hidden;display:flex}
+  .alloc-bar .seg{height:100%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:9px;font-weight:700;color:#06120c;white-space:nowrap;overflow:hidden}
+  .alloc-bar .seg.bag{background:linear-gradient(180deg,#3fd0ff,#2ba8d0)}
+  .alloc-bar .seg.fuel{background:linear-gradient(180deg,#27d796,#1da874)}
+  .alloc-bar .seg.spare{background:#1a2230;color:var(--faint)}
+  .alloc-bar .seg.over{background:linear-gradient(180deg,#ff5a52,#cc3f38);color:#fff}
+  .alloc-actions{display:flex;gap:9px;margin-top:11px}
+  .alloc-btn{flex:1;background:var(--bg);border:1px solid var(--line);color:var(--amber);padding:10px;
+    border-radius:9px;font-family:var(--mono);font-size:10px;letter-spacing:.5px;cursor:pointer}
+  .alloc-btn:active{background:#1a2230}
+  .alloc-remain{margin-top:12px;font-family:var(--mono);font-size:12px;display:flex;flex-direction:column;gap:6px}
+  .alloc-remain .r{display:flex;justify-content:space-between}
+  .alloc-remain .r .lab{color:var(--dim)}
+  .alloc-remain .r .val{font-weight:700}
+  .alloc-remain .r .val.ok{color:var(--green)}
+  .alloc-remain .r .val.bad{color:var(--red)}
+  .alloc-remain .r .val.warn{color:var(--amber)}
+
+  /* CG toggle + collapse */
+  .cg-toggle{display:flex;align-items:center;gap:11px;cursor:pointer;user-select:none}
+  .cg-toggle input{display:none}
+  .cg-switch{width:42px;height:24px;border-radius:13px;background:var(--panel2);
+    border:1px solid var(--line);position:relative;flex:none;transition:.2s}
+  .cg-switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;
+    border-radius:50%;background:var(--faint);transition:.2s}
+  .cg-toggle input:checked + .cg-switch{background:var(--amber-dim);border-color:var(--amber)}
+  .cg-toggle input:checked + .cg-switch::after{transform:translateX(18px);background:var(--amber)}
+  .cg-title{font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;font-family:var(--mono)}
+  .cg-toggle input:checked ~ .cg-title{color:var(--amber)}
+  .cg-body{max-height:0;overflow:hidden;opacity:.35;transition:max-height .3s,opacity .3s;pointer-events:none}
+  .cg-body.open{max-height:3000px;opacity:1;pointer-events:auto}
+
+  .st-head{display:grid;grid-template-columns:1fr 88px 80px 38px;gap:8px;margin:2px 0 6px;align-items:end}
+  .st-head span{font-size:9px;letter-spacing:1px;color:var(--faint);font-family:var(--mono);text-transform:uppercase}
+  .st-head em{font-style:normal;color:var(--dim)}
+  .st-row{display:grid;grid-template-columns:1fr 88px 80px 38px;gap:8px;margin-bottom:8px;align-items:center}
+  .st-row .nm{font-family:var(--mono);font-size:11px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .st-row input{padding:11px 9px;font-size:15px}
+  .st-row .rm{background:var(--panel2);border:1px solid var(--line);color:var(--red);
+    height:42px;border-radius:9px;font-size:16px;cursor:pointer}
+  .st-row.locked .nm{color:var(--dim)}
+
+  /* CG envelope strip */
+  .cg-env{margin-top:16px;background:linear-gradient(180deg,#0c1119,#0a0e14);border:1px solid var(--line);
+    border-radius:12px;padding:16px}
+  .cg-readout{font-family:var(--mono);font-size:30px;font-weight:700;line-height:1;margin-bottom:3px}
+  .cg-readout small{font-size:13px;color:var(--dim);font-weight:400}
+  .cg-track{position:relative;height:46px;margin:18px 0 6px}
+  .cg-band{position:absolute;top:14px;height:18px;background:rgba(39,215,150,.18);
+    border-left:2px solid var(--green);border-right:2px solid var(--green);border-radius:3px}
+  .cg-scale{position:absolute;top:0;height:100%;width:100%}
+  .cg-marker{position:absolute;top:6px;width:3px;height:34px;background:var(--amber);
+    box-shadow:0 0 8px var(--amber);border-radius:2px;transition:left .25s}
+  .cg-marker::after{content:"▼";position:absolute;top:-13px;left:-5px;color:var(--amber);font-size:11px}
+  .cg-marker.bad{background:var(--red);box-shadow:0 0 8px var(--red)}
+  .cg-marker.bad::after{color:var(--red)}
+  .cg-ends{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .cg-lbl{position:absolute;top:34px;font-family:var(--mono);font-size:9px;color:var(--green);transform:translateX(-50%)}
+
+  /* donut / pie */
+  .pie-wrap{display:flex;align-items:center;gap:18px;margin-bottom:16px;flex-wrap:wrap}
+  .donut{width:128px;height:128px;flex:none}
+  .donut-big{fill:var(--ink);font-family:var(--mono);font-size:22px;font-weight:700}
+  .donut-sub{fill:var(--dim);font-family:var(--mono);font-size:8px;letter-spacing:1px}
+  .pie-legend{display:flex;flex-direction:column;gap:7px;flex:1;min-width:120px}
+  .pie-legend span{font-size:11px;color:var(--dim);font-family:var(--mono);display:flex;align-items:center;gap:7px}
+
+  /* airport info card */
+  .ap-card{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:13px;margin-bottom:11px}
+  .ap-h{display:flex;gap:12px;align-items:flex-start;margin-bottom:10px}
+  .ap-code{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--amber);min-width:52px}
+  .ap-meta{font-size:13px;color:var(--ink);line-height:1.35}
+  .ap-meta b{color:var(--amber);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;font-family:var(--mono)}
+  .ap-sub{font-size:11px;color:var(--dim);font-family:var(--mono)}
+  .rwy-list{display:flex;flex-direction:column;gap:7px}
+  .rwy{display:grid;grid-template-columns:62px 1fr auto;gap:10px;align-items:baseline;
+    padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
+  .rwy-id{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--cyan)}
+  .rwy-len{font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .rwy-len em{font-style:normal;color:var(--faint);font-size:11px}
+  .rwy-surf{font-family:var(--mono);font-size:10px;color:var(--dim);text-align:right}
+  .ap-note{font-size:11px;color:var(--faint);font-family:var(--mono);line-height:1.5;
+    background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:10px}
+  .ap-sec{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;
+    margin:13px 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
+  .freq-list{display:flex;flex-direction:column;gap:6px}
+  .freq{display:flex;align-items:baseline;gap:10px;padding:7px 10px;background:var(--bg);
+    border:1px solid var(--line);border-radius:8px}
+  .freq-svc{font-family:var(--mono);font-size:11px;color:var(--cyan);min-width:90px}
+  .freq-mhz{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink);margin-left:auto}
+
+  /* strip editor */
+  .strip-editor{margin-top:13px;padding-top:13px;border-top:1px solid var(--line)}
+  .se-sec{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--dim);text-transform:uppercase;margin:12px 0 7px}
+  .se-input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    padding:10px;border-radius:8px;font-size:14px;font-family:var(--mono)}
+  .se-row{display:flex;gap:6px;align-items:center;margin-bottom:7px}
+  .se-sm{background:var(--bg);border:1px solid var(--line);color:var(--ink);padding:9px 8px;
+    border-radius:7px;font-size:13px;font-family:var(--mono);min-width:0;flex:1}
+  .se-row select.se-sm{flex:1.2}
+  .se-lit{font-family:var(--mono);font-size:11px;color:var(--dim);display:flex;align-items:center;gap:4px;flex:none;white-space:nowrap}
+  .se-lit input{width:auto;margin:0}
+  .se-del{background:var(--panel2);border:1px solid var(--line);color:var(--red);
+    width:32px;height:32px;border-radius:7px;font-size:13px;cursor:pointer;flex:none}
+  .se-empty{font-family:var(--mono);font-size:11px;color:var(--faint);padding:6px 0}
+  .se-add{width:100%;background:var(--panel2);border:1px dashed var(--line);color:var(--cyan);
+    font-family:var(--mono);font-size:11px;padding:9px;border-radius:8px;cursor:pointer;margin-top:2px}
+  .se-save-row{margin-top:14px}
+  .se-save{width:100%;background:var(--amber);color:#06120c;border:none;padding:12px;
+    border-radius:9px;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:1px;cursor:pointer}
+
+  /* legs */
+  .leg-card{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:13px;margin-bottom:10px}
+  .leg-h{font-family:var(--mono);font-size:13px;color:var(--ink);font-weight:700;display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+  .leg-h .leg-dist{margin-left:auto;color:var(--amber)}
+  .leg-row{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .leg-row .ok{color:var(--green)} .leg-row .bad{color:var(--red)}
+  .leg-warn{margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--amber);
+    background:rgba(255,176,0,.08);border:1px solid var(--amber-dim);border-radius:8px;padding:9px;line-height:1.5}
+  .stops-card{background:var(--bg);border:1px solid var(--line);border-radius:11px;padding:13px;margin:0 0 10px}
+  .stop{display:flex;align-items:center;gap:11px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .stop:last-of-type{border-bottom:none}
+  .stop .info{flex:1;min-width:0}
+  .stop .nm{font-size:13px;color:var(--ink);font-weight:600}
+  .stop .meta{font-size:10px;color:var(--dim);font-family:var(--mono);margin-top:2px}
+  .stop .ctag{background:var(--amber-dim);color:var(--amber);font-size:8px;padding:1px 5px;border-radius:4px;letter-spacing:.5px;vertical-align:middle}
+  .stop-d{font-family:var(--mono);font-size:13px;color:var(--cyan);font-weight:700;text-align:right}
+  .stop-d small{display:block;font-size:9px;color:var(--faint);font-weight:400}
+  .stop-add{background:var(--amber);color:#06120c;border:none;width:34px;height:34px;border-radius:9px;
+    font-size:18px;font-weight:700;cursor:pointer;flex:none}
+  .stop-add:active{filter:brightness(1.15)}
+  .wp-chips{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0}
+  .wp-chip{background:var(--panel2);border:1px solid var(--amber-dim);color:var(--amber);
+    font-family:var(--mono);font-size:11px;padding:5px 6px 5px 10px;border-radius:8px;display:flex;align-items:center;gap:4px}
+  .wp-chip button{background:none;border:none;color:var(--red);font-size:15px;cursor:pointer;padding:0 2px}
+
+  /* visible "pick on map" button */
+  .map-pick-btn{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--cyan);
+    font-family:var(--mono);font-size:12px;letter-spacing:.3px;padding:11px;border-radius:9px;cursor:pointer;margin:2px 0 4px}
+  .map-pick-btn:active{background:#1a2230}
+
+  /* range map under arrival */
+  .rangemap-wrap{margin-top:12px;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg)}
+  .rangemap-h{font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--dim);text-transform:uppercase;padding:10px 12px 0}
+  .rangemap-h span{color:var(--amber);text-transform:none;letter-spacing:0}
+  .rangemap{width:100%;height:260px;background:#0c1119;position:relative;z-index:0}
+
+  /* ===== MAP MODE ===== */
+  #mapModeContainer{position:relative;width:100%;height:calc(100vh - 64px);height:calc(100dvh - 64px)}
+  #liveMap{position:absolute;inset:0;background:#0c1119;z-index:0}
+  .livemap-offline{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:13px;color:var(--faint);text-align:center;padding:30px;z-index:1}
+  .mm-controls{position:absolute;top:10px;left:10px;right:10px;z-index:10;display:flex;gap:7px;flex-wrap:wrap}
+  .mm-btn{background:rgba(18,24,33,.92);border:1px solid var(--line);color:var(--ink);
+    font-family:var(--mono);font-size:11px;letter-spacing:.3px;padding:9px 11px;border-radius:9px;cursor:pointer;
+    display:flex;align-items:center;gap:5px;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+  .mm-btn.active{background:var(--amber);color:#06120c;border-color:var(--amber);font-weight:700}
+  .mm-btn:active{filter:brightness(1.15)}
+  .mm-dot{width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block}
+  .mm-btn.active .mm-dot{background:#06120c}
+  .mm-info{position:absolute;bottom:10px;left:10px;right:10px;z-index:10;
+    background:rgba(18,24,33,.92);border:1px solid var(--line);border-radius:11px;padding:11px 14px;
+    display:flex;gap:16px;flex-wrap:wrap;justify-content:space-around;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+  .mm-info .mi{text-align:center}
+  .mm-info .mi .k{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--dim);text-transform:uppercase}
+  .mm-info .mi .v{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--amber);margin-top:2px}
+  .mm-nearest{position:absolute;bottom:96px;left:10px;right:10px;z-index:10;max-height:40vh;overflow-y:auto;
+    background:rgba(18,24,33,.96);border:1px solid var(--line);border-radius:12px;padding:12px;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+  .mm-nearest h4{margin:0 0 9px;font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--amber);text-transform:uppercase}
+  .mm-near-row{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer}
+  .mm-near-row:last-child{border-bottom:none}
+  .mm-near-row:active{background:#1a2230}
+  .mm-near-row.tgt{background:rgba(255,79,216,.12);border-radius:8px;padding-left:8px;padding-right:8px}
+  .mm-near-row .c{font-family:var(--mono);font-weight:700;color:var(--cyan);min-width:48px}
+  .mm-near-row .n{flex:1;font-size:12px;color:var(--ink);min-width:0}
+  .mm-near-row .d{font-family:var(--mono);font-size:12px;color:var(--amber);text-align:right}
+  .mm-near-row .d small{display:block;color:var(--faint);font-size:9px}
+  .mm-near-row .go{font-family:var(--mono);font-size:10px;color:#ff4fd8;white-space:nowrap;min-width:54px;text-align:right}
+  .mm-near-row.tgt .go{color:#ff4fd8;font-weight:700}
+  .mm-clear-direct{width:100%;margin-top:10px;background:var(--panel2);border:1px solid #ff4fd8;
+    color:#ff4fd8;font-family:var(--mono);font-size:11px;padding:9px;border-radius:8px;cursor:pointer}
+
+  /* weather block */
+  .wx-block{margin-top:10px}
+  .wx-line{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;padding:6px 0}
+  .wx-cat{width:10px;height:10px;border-radius:50%;flex:none}
+  .wx-cat.vfr{background:#27d796} .wx-cat.mvfr{background:#3fd0ff}
+  .wx-cat.ifr{background:#ff5a52} .wx-cat.lifr{background:#c061ff}
+  .wx-raw{font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.5;word-break:break-word;
+    background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px;margin-top:6px}
+  .wx-decoded{font-size:12px;color:var(--ink);line-height:1.6;margin-top:6px}
+
+  /* ===== CHECKLISTS ===== */
+  .cl-cat{background:var(--panel);border:1px solid var(--line);border-radius:13px;margin-bottom:12px;overflow:hidden}
+  .cl-cat-h{display:flex;align-items:center;gap:10px;padding:14px;cursor:pointer;background:var(--panel2)}
+  .cl-cat-h .cl-name{flex:1;font-size:15px;font-weight:600;color:var(--ink)}
+  .cl-cat-h .cl-prog{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .cl-cat-h .cl-chev{color:var(--faint);font-size:14px;transition:transform .2s}
+  .cl-cat.open .cl-chev{transform:rotate(90deg)}
+  .cl-items{display:none;padding:6px 14px 14px}
+  .cl-cat.open .cl-items{display:block}
+  .cl-item{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .cl-item:last-of-type{border-bottom:none}
+  .cl-check{width:26px;height:26px;border-radius:7px;border:2px solid var(--line);flex:none;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:15px;color:transparent}
+  .cl-item.done .cl-check{background:var(--green);border-color:var(--green);color:#06120c}
+  .cl-item.done .cl-text{color:var(--faint);text-decoration:line-through}
+  .cl-text{flex:1;font-size:14px;color:var(--ink)}
+  .cl-edit-row{display:flex;gap:8px;margin-top:10px}
+  .cl-edit-row input{flex:1;background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    padding:10px;border-radius:8px;font-size:13px}
+  .cl-mini{background:var(--panel2);border:1px solid var(--line);color:var(--amber);
+    font-family:var(--mono);font-size:11px;padding:8px 11px;border-radius:8px;cursor:pointer}
+  .cl-del{color:var(--red);border:none;background:none;cursor:pointer;font-size:16px;flex:none;padding:0 4px}
+  .cl-toolbar{display:flex;gap:9px;margin-bottom:14px;flex-wrap:wrap}
+  .cl-toolbar button{flex:1;min-width:fit-content;background:var(--panel2);border:1px solid var(--line);
+    color:var(--amber);font-family:var(--mono);font-size:11px;padding:11px;border-radius:9px;cursor:pointer}
+  .cl-reset{color:var(--cyan)!important}
+  .rangemap-offline{height:120px;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:12px;color:var(--faint);text-align:center;padding:20px}
+  .rangemap-wrap .hint{padding:0 12px 11px}
+
+  /* route map (in results) */
+  .routemap-wrap{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--bg);margin-bottom:11px}
+  .routemap{width:100%;height:300px;background:#0c1119;position:relative;z-index:0}
+
+  /* add-stop picker inside a leg */
+  .addstop-wrap{margin-top:10px;position:relative}
+  .addstop-toggle{width:100%;background:var(--panel2);border:1px dashed var(--line);color:var(--cyan);
+    font-family:var(--mono);font-size:11px;letter-spacing:.3px;padding:10px;border-radius:8px;cursor:pointer}
+  .addstop-toggle:active{background:#1a2230}
+  .addstop-picker{margin-top:8px;display:none}
+  .addstop-picker.open{display:block}
+  .addstop-picker input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--ink);
+    padding:11px;border-radius:8px;font-size:14px;font-family:var(--mono)}
+  .addstop-list{max-height:230px;overflow-y:auto;margin-top:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+  .addstop-list .ac-opt{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:10px;align-items:baseline}
+  .addstop-list .ac-opt:active{background:#1a2230}
+
+  /* map picker modal */
+  .map-modal{position:fixed;inset:0;z-index:5000;background:rgba(5,8,12,.92);display:none;
+    align-items:stretch;flex-direction:column;backdrop-filter:blur(3px)}
+  .map-modal.open{display:flex}
+  .map-top{padding:14px 16px;display:flex;align-items:center;gap:12px;background:var(--panel);border-bottom:1px solid var(--line)}
+  .map-top h3{margin:0;font-family:var(--mono);font-size:13px;letter-spacing:1px;color:var(--amber);flex:1}
+  .map-top button{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    padding:9px 14px;border-radius:9px;font-family:var(--mono);font-size:12px;cursor:pointer}
+  #mapEl{flex:1;width:100%;background:#0c1119}
+  .map-foot{padding:14px 16px;background:var(--panel);border-top:1px solid var(--line)}
+  .map-coord{font-family:var(--mono);font-size:13px;color:var(--ink);margin-bottom:11px;text-align:center}
+  .map-coord b{color:var(--amber)}
+  .map-foot .row{display:flex;gap:10px}
+  .map-foot button.primary{flex:1;background:var(--amber);color:#06120c;border:none;padding:13px;
+    border-radius:10px;font-family:var(--mono);font-size:13px;font-weight:700;letter-spacing:1px;cursor:pointer}
+  .map-foot button.primary:disabled{background:var(--faint);color:var(--panel)}
+  .map-hint{font-family:var(--mono);font-size:10px;color:var(--faint);text-align:center;margin-top:9px}
+  /* offline map */
+  .offmap-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:10px}
+  #offmap{width:100%;height:100%;touch-action:none}
+  .pickbtn{width:100%;background:var(--panel2);border:1px dashed var(--line);color:var(--cyan);
+    padding:11px;border-radius:9px;font-family:var(--mono);font-size:11px;letter-spacing:.5px;cursor:pointer;margin-top:8px}
+  .pickbtn:active{background:#1a2230}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <button id="backBtn" class="back-btn" style="display:none">‹</button>
+  <div class="tb-titles">
+    <h1 id="tbTitle">✈ VFR PLANNER · ZA</h1>
+    <div class="sub" id="tbSub">South Africa · straight-line flight planning</div>
+  </div>
+</div>
+
+<!-- HOME SCREEN -->
+<div class="screen" id="screen-home">
+  <div class="wrap">
+    <div class="home-hero">
+      <div class="hero-ico">✈</div>
+      <div class="hero-txt">Plan a bush trip, check weight &amp; balance, and save routes you fly again.</div>
+    </div>
+    <button class="home-tile primary" data-go="plan">
+      <span class="tile-ico">🧭</span>
+      <span class="tile-body"><span class="tile-t">Plan a flight</span><span class="tile-d">Route, fuel, weight &amp; balance</span></span>
+      <span class="tile-arrow">›</span>
+    </button>
+    <button class="home-tile primary" data-go="mapmode">
+      <span class="tile-ico">🗺</span>
+      <span class="tile-body"><span class="tile-t">Map mode</span><span class="tile-d">Live map, route, weather &amp; GPS</span></span>
+      <span class="tile-arrow">›</span>
+    </button>
+    <button class="home-tile" data-go="trips">
+      <span class="tile-ico">🗂</span>
+      <span class="tile-body"><span class="tile-t">Saved trips</span><span class="tile-d" id="tripCount">No saved trips yet</span></span>
+      <span class="tile-arrow">›</span>
+    </button>
+    <button class="home-tile" data-go="aircraft">
+      <span class="tile-ico">🛩</span>
+      <span class="tile-body"><span class="tile-t">My aircraft</span><span class="tile-d" id="acCount">No saved aircraft</span></span>
+      <span class="tile-arrow">›</span>
+    </button>
+    <button class="home-tile" data-go="checklists">
+      <span class="tile-ico">✓</span>
+      <span class="tile-body"><span class="tile-t">Checklists</span><span class="tile-d" id="clCount">Tap to set up</span></span>
+      <span class="tile-arrow">›</span>
+    </button>
+    <button class="home-tile" data-go="strips">
+      <span class="tile-ico">📍</span>
+      <span class="tile-body"><span class="tile-t">My strips</span><span class="tile-d" id="stripCount">No custom strips</span></span>
+      <span class="tile-arrow">›</span>
+    </button>
+
+    <div class="backup-box">
+      <div class="backup-h">Backup &amp; restore</div>
+      <div class="backup-d">Save your trips, aircraft &amp; strips to a file, or move them to another device.</div>
+      <div class="backup-row">
+        <button id="exportFile" class="bk-btn">⬇ EXPORT FILE</button>
+        <button id="importFile" class="bk-btn">⬆ IMPORT FILE</button>
+      </div>
+      <div class="backup-row">
+        <button id="exportCode" class="bk-btn ghost">⧉ COPY CODE</button>
+        <button id="importCode" class="bk-btn ghost">⤓ PASTE CODE</button>
+      </div>
+      <input type="file" id="fileInput" accept="application/json,.json,.txt" style="display:none">
+      <div class="hint" style="margin-top:10px">Data lives on this device. Export to back it up; import on another device to copy it across.</div>
+    </div>
+
+    <div class="disc" style="padding:18px 4px 0">
+      Planning aid only — not for navigation. Verify with current charts, NOTAMs &amp; the official AIP. You are pilot-in-command.
+    </div>
+  </div>
+</div>
+
+<!-- SAVED TRIPS SCREEN -->
+<div class="screen" id="screen-trips">
+  <div class="wrap">
+    <div id="tripsList"></div>
+    <div class="hint" style="text-align:center;margin-top:8px">Plan a flight, then use “Save as trip” to store a route here.</div>
+  </div>
+</div>
+
+<!-- MY AIRCRAFT SCREEN -->
+<div class="screen" id="screen-aircraft">
+  <div class="wrap">
+    <button class="addpax" id="addAcBtn" style="margin-bottom:14px">＋ Add an aircraft</button>
+
+    <div class="card" id="acForm" style="display:none">
+      <div class="card-h" id="acFormTitle">New aircraft</div>
+      <div class="units" style="margin-bottom:10px">
+        <div class="uset"><span class="ulab">Speed</span>
+          <div class="opts" data-unit="dist"><button data-v="nm">NM</button><button data-v="km">KM</button></div></div>
+        <div class="uset"><span class="ulab">Weight</span>
+          <div class="opts" data-unit="wt"><button data-v="kg">KG</button><button data-v="lb">LB</button></div></div>
+      </div>
+      <div class="units" style="margin-bottom:13px">
+        <div class="uset"><span class="ulab">Fuel</span>
+          <div class="opts" data-unit="vol"><button data-v="L">L</button><button data-v="usg">US GAL</button></div></div>
+        <div class="uset" style="visibility:hidden"></div>
+      </div>
+      <div class="field">
+        <label>Name / registration</label>
+        <input id="af_name" type="text" placeholder="ZS-ABC C172" autocomplete="off">
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Cruise speed <span class="unit" data-u="speed">kt</span></label>
+          <input id="af_tas" type="number" inputmode="decimal" placeholder="110"></div>
+        <div class="field"><label>Fuel burn <span class="unit" data-u="burn">L/hr</span></label>
+          <input id="af_burn" type="number" inputmode="decimal" placeholder="32"></div>
+        <div class="field"><label>Tank capacity <span class="unit" data-u="vol">L</span></label>
+          <input id="af_fuel" type="number" inputmode="decimal" placeholder="120"></div>
+        <div class="field"><label>Reserve <span class="unit">min</span></label>
+          <input id="af_reserve" type="number" inputmode="numeric" placeholder="60"></div>
+        <div class="field"><label>Empty weight <span class="unit" data-u="wt">kg</span></label>
+          <input id="af_empty" type="number" inputmode="decimal" placeholder="700"></div>
+        <div class="field"><label>Max takeoff <span class="unit" data-u="wt">kg</span></label>
+          <input id="af_mtow" type="number" inputmode="decimal" placeholder="1055"></div>
+        <div class="field"><label>Glide ratio <span class="unit">:1 (optional)</span></label>
+          <input id="af_glide" type="number" inputmode="decimal" placeholder="9"></div>
+      </div>
+      <div class="saverow">
+        <button id="af_save">✓ SAVE AIRCRAFT</button>
+        <button id="af_cancel">✕ CANCEL</button>
+      </div>
+    </div>
+
+    <div id="acManageList"></div>
+    <div class="hint" style="text-align:center;margin-top:8px">Aircraft can also be saved from the planner.</div>
+  </div>
+</div>
+
+<!-- MY STRIPS SCREEN -->
+<div class="screen" id="screen-strips">
+  <div class="wrap">
+    <div class="backup-row" style="margin-bottom:14px">
+      <button class="bk-btn" id="addStripMap">🗺 ADD FROM MAP</button>
+      <button class="bk-btn" id="addStripHome">＋ ADD COORDINATES</button>
+    </div>
+    <div id="stripManageList"></div>
+  </div>
+</div>
+
+<!-- MAP MODE SCREEN -->
+<div class="screen" id="screen-mapmode">
+  <div id="mapModeContainer">
+    <div id="liveMap"></div>
+    <div id="liveMapOffline" class="livemap-offline" style="display:none">Map needs an internet connection.</div>
+    <!-- floating control bar -->
+    <div class="mm-controls">
+      <button class="mm-btn" id="mmGps">GPS<span class="mm-dot" id="mmGpsDot"></span></button>
+      <button class="mm-btn" id="mmGlide" title="Glide ring">⤓ Glide</button>
+      <button class="mm-btn" id="mmNearest" title="Nearest airfield">⊙ Nearest</button>
+      <button class="mm-btn" id="mmTrack" title="Breadcrumb trail">⋯ Track</button>
+      <button class="mm-btn" id="mmWx" title="Weather">☁ Wx</button>
+      <button class="mm-btn" id="mmRecenter" title="Recenter">◎</button>
+    </div>
+    <!-- info strip (own-ship data) -->
+    <div class="mm-info" id="mmInfo" style="display:none"></div>
+    <!-- nearest panel -->
+    <div class="mm-nearest" id="mmNearestPanel" style="display:none"></div>
+  </div>
+</div>
+
+<!-- CHECKLISTS SCREEN -->
+<div class="screen" id="screen-checklists">
+  <div class="wrap">
+    <div id="clView"></div>
+  </div>
+</div>
+
+<!-- PLAN SCREEN (the planner) -->
+<div class="screen" id="screen-plan">
+<div class="wrap">
+
+  <!-- ROUTE -->
+  <div class="card">
+    <div class="card-h">Route <button id="saveTripBtn" class="mini-btn">＋ Save as trip</button></div>
+    <div class="field ac-picker">
+      <label>Departure</label>
+      <input id="depSearch" type="text" autocomplete="off" autocapitalize="characters"
+             placeholder="Type ICAO, name or city…">
+      <div id="depList" class="ac-list" role="listbox"></div>
+    </div>
+    <button class="map-pick-btn" id="depMapBtn">🗺 Pick departure on the map</button>
+    <div class="swap"><button id="swapBtn" title="Swap">⇅</button></div>
+    <div class="field ac-picker">
+      <label>Destination</label>
+      <input id="arrSearch" type="text" autocomplete="off" autocapitalize="characters"
+             placeholder="Type ICAO, name or city…">
+      <div id="arrList" class="ac-list" role="listbox"></div>
+    </div>
+    <button class="map-pick-btn" id="arrMapBtn">🗺 Pick destination on the map</button>
+    <div id="rangeMapWrap" class="rangemap-wrap" style="display:none">
+      <div class="rangemap-h">Range from departure <span id="rangeMapLabel"></span></div>
+      <div id="rangeMap" class="rangemap"></div>
+      <div id="rangeMapOffline" class="rangemap-offline" style="display:none">Range map needs an internet connection.</div>
+      <div class="hint">Circle shows your usable range (reach with reserve intact). Airports inside it are reachable direct.</div>
+    </div>
+  </div>
+
+  <!-- UNITS -->
+  <div class="card">
+    <div class="card-h">Units</div>
+    <div class="units">
+      <div class="uset"><span class="ulab">Distance</span>
+        <div class="opts" data-unit="dist">
+          <button data-v="nm" class="on">NM</button><button data-v="km">KM</button>
+        </div></div>
+      <div class="uset"><span class="ulab">Weight</span>
+        <div class="opts" data-unit="wt">
+          <button data-v="kg" class="on">KG</button><button data-v="lb">LB</button>
+        </div></div>
+    </div>
+    <div class="units">
+      <div class="uset"><span class="ulab">Fuel volume</span>
+        <div class="opts" data-unit="vol">
+          <button data-v="L" class="on">L</button><button data-v="usg">US GAL</button>
+        </div></div>
+      <div class="uset"><span class="ulab">Fuel type</span>
+        <div class="selwrap" style="flex:1">
+          <select id="fueltype" style="padding:7px 10px;font-size:13px">
+            <option value="avgas">Avgas 100LL · 0.72</option>
+            <option value="jeta">Jet A-1 · 0.80</option>
+            <option value="mogas">Mogas · 0.74</option>
+          </select>
+        </div></div>
+    </div>
+    <div class="units">
+      <div class="uset"><span class="ulab">Moment arm</span>
+        <div class="opts" data-unit="arm">
+          <button data-v="m" class="on">M</button><button data-v="in">IN</button>
+        </div></div>
+      <div class="uset" style="visibility:hidden"></div>
+    </div>
+    <div class="hint">Fuel volume and weight convert through the selected fuel's density.</div>
+  </div>
+
+  <!-- AIRCRAFT PERFORMANCE -->
+  <div class="card">
+    <div class="card-h">Aircraft profile</div>
+    <div class="field selwrap">
+      <label>Saved aircraft</label>
+      <select id="acProfile"><option value="">— Custom —</option></select>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label>Cruise speed <span class="unit" data-u="speed">kt</span></label>
+        <input id="tas" type="number" inputmode="decimal" placeholder="110" value="110">
+      </div>
+      <div class="field">
+        <label>Fuel burn <span class="unit" data-u="burn">L/hr</span></label>
+        <input id="burn" type="number" inputmode="decimal" placeholder="32" value="32">
+      </div>
+      <div class="field">
+        <label>Tank capacity <span class="unit" data-u="vol">L</span></label>
+        <input id="fuel" type="number" inputmode="decimal" placeholder="120" value="120">
+      </div>
+      <div class="field">
+        <label>Reserve <span class="unit">min</span></label>
+        <input id="reserve" type="number" inputmode="numeric" placeholder="60" value="60">
+      </div>
+    </div>
+    <div class="hint">Tank capacity is the most usable fuel you can carry. Reserve is the fuel time you keep untouched. Cruise speed treated as groundspeed (no wind).</div>
+  </div>
+
+  <!-- WEIGHT & BALANCE -->
+  <div class="card">
+    <div class="card-h">Weight &amp; loading</div>
+    <div class="grid2">
+      <div class="field">
+        <label>Empty weight <span class="unit" data-u="wt">kg</span></label>
+        <input id="empty" type="number" inputmode="decimal" placeholder="700" value="700">
+      </div>
+      <div class="field">
+        <label>Max takeoff (MTOW) <span class="unit" data-u="wt">kg</span></label>
+        <input id="mtow" type="number" inputmode="decimal" placeholder="1055" value="1055">
+      </div>
+    </div>
+
+    <label>Passengers &amp; crew</label>
+    <div id="paxList"></div>
+    <button class="addpax" id="addPax">⊕ ADD PERSON</button>
+
+    <div class="alloc">
+      <div class="alloc-head">
+        <span>Load allocation</span>
+        <span id="allocAvail" class="alloc-avail">—</span>
+      </div>
+      <div class="alloc-bar"><div class="track" id="allocTrack"></div></div>
+      <div class="grid2" style="margin-top:13px">
+        <div class="field">
+          <label>Baggage / cargo <span class="unit" data-u="wt">kg</span></label>
+          <input id="cargo" type="number" inputmode="decimal" placeholder="20" value="20">
+        </div>
+        <div class="field">
+          <label>Fuel to load <span class="unit" data-u="vol">L</span></label>
+          <input id="fuelload" type="number" inputmode="decimal" placeholder="80" value="80">
+        </div>
+      </div>
+      <div class="alloc-actions">
+        <button id="maxFuel" class="alloc-btn">⛽ FILL FUEL TO MAX</button>
+        <button id="maxBag" class="alloc-btn">📦 MAX BAGGAGE</button>
+      </div>
+      <div id="allocRemain" class="alloc-remain"></div>
+    </div>
+
+    <div class="saverow">
+      <button id="saveAc">⊕ SAVE AIRCRAFT</button>
+      <button id="delAc">⊖ DELETE</button>
+    </div>
+    <div class="hint">Available load = MTOW − empty − people. Allocate it between baggage and fuel; "remaining" is what you leave behind MTOW. CG is optional — enable below.</div>
+  </div>
+
+  <!-- CG / BALANCE (optional) -->
+  <div class="card">
+    <label class="cg-toggle">
+      <input type="checkbox" id="cgEnable">
+      <span class="cg-switch"></span>
+      <span class="cg-title">CG / balance calculation</span>
+    </label>
+    <div id="cgBody" class="cg-body">
+      <div class="hint" style="margin:12px 0 14px">
+        Enter each station's weight and moment arm from your aircraft's POH.
+        Arm is the distance from the datum. Aircraft (empty) is one station — don't split it.
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label>Forward CG limit <span class="unit" data-u="arm">m</span></label>
+          <input id="cgFwd" type="number" inputmode="decimal" placeholder="1.95" value="1.95">
+        </div>
+        <div class="field">
+          <label>Aft CG limit <span class="unit" data-u="arm">m</span></label>
+          <input id="cgAft" type="number" inputmode="decimal" placeholder="2.30" value="2.30">
+        </div>
+      </div>
+
+      <label>Loading stations</label>
+      <div class="st-head">
+        <span class="st-name-h">Station</span>
+        <span class="st-w-h">Weight <em data-u="wt">kg</em></span>
+        <span class="st-a-h">Arm <em data-u="arm">m</em></span>
+        <span class="st-x-h"></span>
+      </div>
+      <div id="cgStations"></div>
+      <button class="addpax" id="addBag">⊕ ADD BAGGAGE</button>
+
+      <div id="cgResult"></div>
+    </div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="results"></div>
+
+</div>
+
+<div class="disc">
+  Straight-line (great-circle) distances for planning only. Not for navigation.
+  Always verify with current charts, NOTAMs &amp; official AIP. Fuel figures exclude
+  taxi, climb, wind &amp; weather. You are pilot-in-command.
+</div>
+</div><!-- /screen-plan -->
+
+<!-- MAP PICKER MODAL -->
+<div class="map-modal" id="mapModal">
+  <div class="map-top">
+    <h3 id="mapTitle">Pick a location</h3>
+    <button id="mapClose">✕ Cancel</button>
+  </div>
+  <div id="mapEl"></div>
+  <div class="offmap-wrap" id="offmapWrap" style="display:none">
+    <canvas id="offmap"></canvas>
+  </div>
+  <div class="map-foot">
+    <div class="map-coord" id="mapCoord">Tap the map to drop a pin</div>
+    <div class="row">
+      <button class="primary" id="mapConfirm" disabled>✓ Use this location</button>
+    </div>
+    <div class="map-hint" id="mapMode">—</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="airports.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

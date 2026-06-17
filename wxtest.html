@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Diagnostic</title>
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;background:#0a0e14;color:#e6edf3;margin:0;padding:16px;line-height:1.5}
+  h1{font-size:18px;color:#ffb000}
+  p{font-size:13px;color:#9fb0c0}
+  button{background:#ffb000;color:#06120c;border:none;padding:14px 20px;border-radius:10px;
+    font-size:15px;font-weight:700;width:100%;margin:12px 0;cursor:pointer}
+  .test{background:#121821;border:1px solid #243040;border-radius:10px;padding:12px;margin:10px 0}
+  .name{font-weight:700;color:#3fd0ff;font-size:13px;font-family:monospace}
+  .status{font-size:12px;margin-top:6px;font-family:monospace;word-break:break-word}
+  .ok{color:#27d796} .fail{color:#ff5a52} .pending{color:#ffb000}
+  .raw{font-size:11px;color:#9fb0c0;font-family:monospace;background:#0a0e14;padding:8px;
+    border-radius:6px;margin-top:6px;max-height:160px;overflow:auto;word-break:break-word;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<h1>VFR Planner — Weather Diagnostic</h1>
+<p>This tests each way of fetching the METAR for <b>FACT</b> (Cape Town). Tap the button, then screenshot the results and send them back. Whichever line says <span class="ok">OK</span> is the method that works on your phone.</p>
+<button id="run">▶ Run weather test</button>
+<div id="out"></div>
+
+<script>
+const ICAO='FACT';
+const apiM='https://aviationweather.gov/api/data/metar?ids='+ICAO+'&format=json';
+
+const methods=[
+  {name:'1. Netlify function (the real fix)', url:'/.netlify/functions/wx?type=metar&ids='+ICAO},
+  {name:'2. allorigins.win', url:'https://api.allorigins.win/raw?url='+encodeURIComponent(apiM)},
+  {name:'3. direct (no proxy)', url:apiM},
+];
+
+function card(m){
+  const d=document.createElement('div'); d.className='test';
+  d.innerHTML='<div class="name">'+m.name+'</div><div class="status pending" id="s_'+m.id+'">testing…</div><div class="raw" id="r_'+m.id+'" style="display:none"></div>';
+  return d;
+}
+
+document.getElementById('run').onclick=async ()=>{
+  const out=document.getElementById('out'); out.innerHTML='';
+  methods.forEach((m,i)=>{ m.id=i; out.appendChild(card(m)); });
+  for(const m of methods){
+    const s=document.getElementById('s_'+m.id);
+    const r=document.getElementById('r_'+m.id);
+    try{
+      const t0=Date.now();
+      const resp=await fetch(m.url);
+      const ms=Date.now()-t0;
+      const text=await resp.text();
+      let parsed=null, station=null;
+      try{ parsed=JSON.parse(text); if(Array.isArray(parsed)&&parsed[0]) station=parsed[0].icaoId||parsed[0].station_id||parsed[0].rawOb; }catch(e){}
+      if(resp.ok && station){
+        s.className='status ok'; s.textContent='OK ('+ms+'ms) — got data for '+station;
+      } else if(resp.ok){
+        s.className='status fail'; s.textContent='HTTP '+resp.status+' but no usable data ('+ms+'ms)';
+      } else {
+        s.className='status fail'; s.textContent='HTTP '+resp.status+' ('+ms+'ms)';
+      }
+      r.style.display='block'; r.textContent=text.slice(0,400);
+    }catch(e){
+      s.className='status fail'; s.textContent='FAILED: '+(e.message||e);
+    }
+  }
+};
+</script>
+</body>
+</html>
